@@ -201,6 +201,7 @@ def render_configure_page(host: str, existing_config: dict = None) -> str:
             <button class="btn btn-install" onclick="installAddon('stremio')">Install Addon</button>
             <button class="btn btn-web" onclick="installAddon('web')">Open in Stremio Web</button>
             <button class="btn btn-copy" onclick="copyUrl()">Copy URL</button>
+            <button class="btn btn-copy" style="background: #1e293b; margin-top: 10px;" onclick="copyBaseUrl()">Copy Base URL (For Publishing)</button>
         </div>
     </div>
 
@@ -259,6 +260,15 @@ def render_configure_page(host: str, existing_config: dict = None) -> str:
             
             navigator.clipboard.writeText(manifestUrl).then(() => {{
                 alert('Manifest URL copied to clipboard!');
+            }}).catch(err => {{
+                console.error('Failed to copy: ', err);
+            }});
+        }}
+
+        function copyBaseUrl() {{
+            const manifestUrl = `https://${{host}}/manifest.json`;
+            navigator.clipboard.writeText(manifestUrl).then(() => {{
+                alert('Base Manifest URL copied! (Use this for Stremio community catalog)');
             }}).catch(err => {{
                 console.error('Failed to copy: ', err);
             }});

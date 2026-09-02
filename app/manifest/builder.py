@@ -27,7 +27,7 @@ async def build_manifest(user_config: UserConfig | None, catalog_registry: Any) 
         id_prefixes=['tt', 'kitsu:', 'anilist:'],
         behavior_hints=BehaviorHints(
             configurable=True,
-            configuration_required=True,
+            configuration_required=(user_config is None),
         ),
     )
     
