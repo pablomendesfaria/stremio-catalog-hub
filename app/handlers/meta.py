@@ -224,6 +224,27 @@ async def _handle_tmdb_meta(request: Request, content_type: str, clean_id: str, 
         
         import urllib.parse
         links = []
+        
+        # Build dynamic manifest URL for discover links
+        base_url = str(request.base_url).rstrip("/")
+        # Extract config from path if present (e.g. /ey.../meta/movie/tt123.json)
+        path_parts = request.url.path.strip("/").split("/")
+        if len(path_parts) > 3 and path_parts[1] == "meta":
+            manifest_url = f"{base_url}/{path_parts[0]}/manifest.json"
+        else:
+            manifest_url = f"{base_url}/manifest.json"
+        encoded_manifest = urllib.parse.quote(manifest_url, safe="")
+        
+        # Add genres
+        for g in details.get("genres", []):
+            encoded_genre = urllib.parse.quote(g["name"])
+            catalog_id = "movie_popular" if content_type == "movie" else "series_popular"
+            links.append({
+                "name": g["name"],
+                "category": "Genres",
+                "url": f"stremio:///discover/{encoded_manifest}/{content_type}/{catalog_id}?genre={encoded_genre}"
+            })
+            
         # Add cast
         credits_data = details.get("credits") or {}
         cast_list = credits_data.get("cast", [])[:5]
