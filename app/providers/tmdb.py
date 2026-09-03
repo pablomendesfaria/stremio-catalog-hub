@@ -154,7 +154,8 @@ class TMDBClient:
         """Get rich details for a movie."""
         params = {
             "language": language,
-            "append_to_response": "credits,videos,external_ids"
+            "append_to_response": "credits,videos,external_ids,images",
+            "include_image_languages": f"{language[:2]},en,null",
         }
         data = await self._request("GET", f"/movie/{movie_id}", params=params)
         return data
@@ -198,7 +199,8 @@ class TMDBClient:
         """Get rich details for a TV series, including season details."""
         params = {
             "language": language,
-            "append_to_response": "credits,videos,external_ids"
+            "append_to_response": "credits,videos,external_ids,images",
+            "include_image_languages": f"{language[:2]},en,null",
         }
         data = await self._request("GET", f"/tv/{tmdb_id}", params=params)
         return data

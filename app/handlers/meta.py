@@ -37,7 +37,7 @@ async def _handle_meta(
     # Strip .json suffix if present
     clean_id = item_id.removesuffix(".json")
 
-    cache_key = f"meta:{content_type}:{clean_id}"
+    cache_key = f"meta:v2:{content_type}:{clean_id}"
     if user_config:
         cache_key += f":{user_config.language}"
 
@@ -239,6 +239,20 @@ async def _handle_tmdb_meta(request: Request, content_type: str, clean_id: str, 
         trailers = [v for v in videos_data.get("results", []) if v.get("site") == "YouTube" and v.get("type") == "Trailer"]
         if trailers:
             meta["trailers"] = [{"source": t["key"], "type": "Trailer"} for t in trailers]
+
+        # Add logo (title treatment image)
+        images_data = details.get("images") or {}
+        logos = images_data.get("logos", [])
+        if logos:
+            # Prefer user's language, then English, then any
+            lang_code = language[:2]
+            logo = next((l for l in logos if l.get("iso_639_1") == lang_code), None)
+            if not logo:
+                logo = next((l for l in logos if l.get("iso_639_1") == "en"), None)
+            if not logo:
+                logo = logos[0]
+            if logo and logo.get("file_path"):
+                meta["logo"] = f"https://image.tmdb.org/t/p/w500{logo['file_path']}"
 
         # Add episodes if series
         if content_type == "series" and "seasons" in details:
