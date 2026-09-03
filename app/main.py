@@ -47,9 +47,16 @@ async def lifespan(app: FastAPI):
 
     logger.info("Starting Catalog Hub addon v%s", settings.addon_version)
 
-    # 1. Redis
+    # ── Database & Cache ────────────────────────────────────────────────
+    
     cache = RedisCache(settings.redis_url)
     await cache.connect()
+    
+    # Invalidate stale HTTP cache on deploy
+    count_catalog = await cache.delete_pattern("catalog:*")
+    count_meta = await cache.delete_pattern("meta:*")
+    logger.info(f"Cleared {count_catalog} catalog and {count_meta} meta cache entries on startup.")
+    
     app.state.cache = cache
 
     # 2. Providers (AniList + MAL — no API key needed)

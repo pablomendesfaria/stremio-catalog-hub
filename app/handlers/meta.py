@@ -222,17 +222,32 @@ async def _handle_tmdb_meta(request: Request, content_type: str, clean_id: str, 
             "runtime": runtime_str if content_type == "movie" else None,
         }
         
+        import urllib.parse
+        links = []
         # Add cast
         credits_data = details.get("credits") or {}
-        cast = [c["name"] for c in credits_data.get("cast", [])[:5]]
-        if cast:
-            meta["cast"] = cast
+        cast_list = credits_data.get("cast", [])[:5]
+        for c in cast_list:
+            encoded_name = urllib.parse.quote(c["name"])
+            links.append({
+                "name": c["name"],
+                "category": "Cast",
+                "url": f"stremio:///search?search={encoded_name}"
+            })
             
         # Add directors
         crew = credits_data.get("crew", [])
         directors = [c["name"] for c in crew if c.get("job") == "Director"]
-        if directors:
-            meta["director"] = directors
+        for d in directors:
+            encoded_name = urllib.parse.quote(d)
+            links.append({
+                "name": d,
+                "category": "Directors",
+                "url": f"stremio:///search?search={encoded_name}"
+            })
+            
+        if links:
+            meta["links"] = links
 
         # Add videos/trailers
         videos_data = details.get("videos") or {}
