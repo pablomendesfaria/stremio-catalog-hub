@@ -65,8 +65,7 @@ async def _handle_anime_meta(request: Request, clean_id: str, user_config: Any) 
     id_mapper = request.app.state.id_mapper
     cache = request.app.state.cache
 
-    # Strip .json suffix if present
-    clean_id = item_id.removesuffix(".json")
+
 
     # ── Resolve to AniList ID ───────────────────────────────────────────
     anilist_id: int | None = None
@@ -168,6 +167,87 @@ async def _handle_anime_meta(request: Request, clean_id: str, user_config: Any) 
         "meta": meta,
         "cacheMaxAge": 86400,  # 24 hours
     }
+
+
+async def _handle_tmdb_meta(request: Request, content_type: str, clean_id: str, user_config: Any) -> dict[str, Any]:
+    if not clean_id.startswith("tmdb:"):
+        raise HTTPException(status_code=400, detail="Only tmdb: IDs are supported for movies/series")
+        
+    try:
+        tmdb_id = int(clean_id.split(":")[1])
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid TMDB ID")
+
+    # If user hasn't configured an API key, we can't fetch TMDB meta
+    api_key = user_config.tmdb_api_key if user_config else ""
+    if not api_key:
+        raise HTTPException(status_code=400, detail="TMDB API Key required for metadata")
+
+    tmdb = TMDBClient(api_key)
+    language = user_config.language if user_config else "pt-BR"
+    
+    try:
+        if content_type == "movie":
+            details = await tmdb.get_movie_details(tmdb_id, language)
+        else:
+            details = await tmdb.get_series_details(tmdb_id, language)
+            
+        meta = {
+            "id": clean_id,
+            "type": content_type,
+            "name": details.get("title") or details.get("name") or "",
+            "poster": tmdb._make_poster_url(details.get("poster_path")),
+            "posterShape": "poster",
+            "background": tmdb._make_backdrop_url(details.get("backdrop_path")),
+            "description": details.get("overview"),
+            "releaseInfo": str(details.get("release_date", "")[:4]) if content_type == "movie" else str(details.get("first_air_date", "")[:4]),
+            "imdbRating": str(round(details["vote_average"], 1)) if details.get("vote_average") else None,
+            "genres": [g["name"] for g in details.get("genres", [])],
+            "runtime": f"{details.get('runtime', 0)} min" if content_type == "movie" else None,
+        }
+        
+        # Add cast
+        credits = details.get("credits", {})
+        cast = [c["name"] for c in credits.get("cast", [])[:5]]
+        if cast:
+            meta["cast"] = cast
+            
+        # Add directors
+        crew = credits.get("crew", [])
+        directors = [c["name"] for c in crew if c.get("job") == "Director"]
+        if directors:
+            meta["director"] = directors
+
+        # Add videos/trailers
+        videos = details.get("videos", {}).get("results", [])
+        trailers = [v for v in videos if v.get("site") == "YouTube" and v.get("type") == "Trailer"]
+        if trailers:
+            meta["trailers"] = [{"source": t["key"], "type": "Trailer"} for t in trailers]
+
+        # Add episodes if series
+        if content_type == "series" and "seasons" in details:
+            meta_videos = []
+            for season in details["seasons"]:
+                s_num = season.get("season_number")
+                # Skip specials (season 0) if you want, but Stremio supports it
+                ep_count = season.get("episode_count", 0)
+                for ep_num in range(1, ep_count + 1):
+                    # We just provide the grid, no need to fetch individual episode names for now to save API calls
+                    meta_videos.append({
+                        "id": f"{clean_id}:{s_num}:{ep_num}",
+                        "title": f"Episódio {ep_num}",
+                        "season": s_num,
+                        "episode": ep_num,
+                    })
+            if meta_videos:
+                meta["videos"] = meta_videos
+
+        return {
+            "meta": meta,
+            "cacheMaxAge": 86400,
+        }
+    finally:
+        await tmdb.close()
 
 
 # ── Route definitions ──────────────────────────────────────────────────
