@@ -73,7 +73,7 @@ async def _handle_catalog(
     page = _skip_to_page(skip)
 
     cache = request.app.state.cache
-    cache_key = f"catalog:{catalog_id}:{language}:{genre_filter}:{search_query}:{page}"
+    cache_key = f"catalog:v2:{catalog_id}:{language}:{genre_filter}:{search_query}:{page}"
 
     # Try cache first
     cached = await cache.get(cache_key)
@@ -191,8 +191,13 @@ async def _fetch_tmdb_catalog(
                 logger.debug(f"Failed to resolve IMDB ID for TMDB {item['tmdb_id']}: {e}")
             return item
             
+        # Resolve IMDB IDs in parallel (max 5 concurrent to avoid rate limiting)
         if items:
-            items = await asyncio.gather(*[resolve_imdb(item) for item in items])
+            sem = asyncio.Semaphore(5)
+            async def resolve_with_sem(item):
+                async with sem:
+                    return await resolve_imdb(item)
+            items = list(await asyncio.gather(*[resolve_with_sem(item) for item in items]))
 
         return [_tmdb_item_to_meta(item, content_type) for item in items]
     finally:

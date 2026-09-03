@@ -144,10 +144,7 @@ class TMDBClient:
         data = await self._request("GET", "/movie/now_playing", params=params)
         return [self._format_list_item(item, "movie") for item in data.get("results", [])]
 
-    async def get_external_ids(self, item_id: int, content_type: str) -> dict[str, Any]:
-        """Fetch external IDs (IMDB) for a movie or series."""
-        endpoint = f"/movie/{item_id}/external_ids" if content_type == "movie" else f"/tv/{item_id}/external_ids"
-        return await self._request("GET", endpoint)
+
 
     async def find_by_external_id(self, external_id: str, external_source: str = "imdb_id") -> dict[str, Any]:
         """Find TMDB item by external ID."""
