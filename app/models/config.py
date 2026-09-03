@@ -27,3 +27,7 @@ class UserConfig(BaseModel):
             "None means all catalogs are enabled."
         ),
     )
+    show_logos: bool = Field(
+        default=True,
+        description="Whether to show image logos instead of text titles",
+    )

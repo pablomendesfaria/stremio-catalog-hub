@@ -35,6 +35,8 @@ def render_configure_page(host: str, existing_config: dict = None) -> str:
     tmdb_key = existing_config.get('tmdb_api_key', '')
     language = existing_config.get('language', 'pt-BR')
     enabled_catalogs = existing_config.get('enabled_catalogs', [c[0] for c in ALL_CATALOGS])
+    show_logos = existing_config.get('show_logos', True)
+    show_logos_checked = "checked" if show_logos else ""
     
     catalogs_html = ""
     for cat_id, cat_name in ALL_CATALOGS:
@@ -196,6 +198,15 @@ def render_configure_page(host: str, existing_config: dict = None) -> str:
                 {catalogs_html}
             </div>
         </div>
+        
+        <div class="form-group">
+            <label>Opções Visuais</label>
+            <label style="display: flex; align-items: center; cursor: pointer; margin-top: 0.5rem; background: #0f172a; padding: 0.75rem; border-radius: 6px; border: 1px solid #334155;">
+                <input type="checkbox" id="show_logos" style="margin-right: 0.75rem;" {show_logos_checked}>
+                <span>Exibir logos oficiais na tela (em vez de texto simples)</span>
+            </label>
+            <div class="help-text">Desative se achar que as imagens das logos ficam muito grandes ou em baixa resolução no seu dispositivo.</div>
+        </div>
 
         <div class="actions">
             <button class="btn btn-install" onclick="installAddon('stremio')">Install Addon</button>
@@ -217,13 +228,15 @@ def render_configure_page(host: str, existing_config: dict = None) -> str:
             document.getElementById('tmdb-error').style.display = 'none';
 
             const language = document.getElementById('language').value;
+            const showLogos = document.getElementById('show_logos').checked;
             const catalogCheckboxes = document.querySelectorAll('input[name="catalogs"]:checked');
             const enabledCatalogs = Array.from(catalogCheckboxes).map(cb => cb.value);
 
             return {{
                 tmdb_api_key: tmdbKey,
                 language: language,
-                enabled_catalogs: enabledCatalogs
+                enabled_catalogs: enabledCatalogs,
+                show_logos: showLogos
             }};
         }}
 

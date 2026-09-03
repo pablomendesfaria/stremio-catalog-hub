@@ -277,18 +277,19 @@ async def _handle_tmdb_meta(request: Request, content_type: str, clean_id: str, 
             meta["trailers"] = [{"source": t["key"], "type": "Trailer"} for t in trailers]
 
         # Add logo (title treatment image)
-        images_data = details.get("images") or {}
-        logos = images_data.get("logos", [])
-        if logos:
-            # Prefer user's language, then English, then any
-            lang_code = language[:2]
-            logo = next((l for l in logos if l.get("iso_639_1") == lang_code), None)
-            if not logo:
-                logo = next((l for l in logos if l.get("iso_639_1") == "en"), None)
-            if not logo:
-                logo = logos[0]
-            if logo and logo.get("file_path"):
-                meta["logo"] = f"https://image.tmdb.org/t/p/w500{logo['file_path']}"
+        if getattr(user_config, "show_logos", True):
+            images_data = details.get("images") or {}
+            logos = images_data.get("logos", [])
+            if logos:
+                # Prefer user's language, then English, then any
+                lang_code = language[:2]
+                logo = next((l for l in logos if l.get("iso_639_1") == lang_code), None)
+                if not logo:
+                    logo = next((l for l in logos if l.get("iso_639_1") == "en"), None)
+                if not logo:
+                    logo = logos[0]
+                if logo and logo.get("file_path"):
+                    meta["logo"] = f"https://image.tmdb.org/t/p/original{logo['file_path']}"
 
         # Add episodes if series
         if content_type == "series" and "seasons" in details:
