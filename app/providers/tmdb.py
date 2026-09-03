@@ -144,13 +144,22 @@ class TMDBClient:
         data = await self._request("GET", "/movie/now_playing", params=params)
         return [self._format_list_item(item, "movie") for item in data.get("results", [])]
 
-    async def get_movie_details(self, tmdb_id: int, language: str = "pt-BR") -> Dict[str, Any]:
+    async def get_external_ids(self, item_id: int, content_type: str) -> dict[str, Any]:
+        """Fetch external IDs (IMDB) for a movie or series."""
+        endpoint = f"/movie/{item_id}/external_ids" if content_type == "movie" else f"/tv/{item_id}/external_ids"
+        return await self._request("GET", endpoint)
+
+    async def find_by_external_id(self, external_id: str, external_source: str = "imdb_id") -> dict[str, Any]:
+        """Find TMDB item by external ID."""
+        return await self._request("GET", f"/find/{external_id}", params={"external_source": external_source})
+
+    async def get_movie_details(self, movie_id: int, language: str = "en-US") -> dict[str, Any]:
         """Get rich details for a movie."""
         params = {
             "language": language,
             "append_to_response": "credits,videos,external_ids"
         }
-        data = await self._request("GET", f"/movie/{tmdb_id}", params=params)
+        data = await self._request("GET", f"/movie/{movie_id}", params=params)
         return data
 
     async def search_movies(self, query: str, language: str = "pt-BR", page: int = 1) -> List[Dict[str, Any]]:

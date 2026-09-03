@@ -170,15 +170,9 @@ async def _handle_anime_meta(request: Request, clean_id: str, user_config: Any) 
 
 
 async def _handle_tmdb_meta(request: Request, content_type: str, clean_id: str, user_config: Any) -> dict[str, Any]:
-    if not clean_id.startswith("tmdb:"):
-        raise HTTPException(status_code=400, detail="Only tmdb: IDs are supported for movies/series")
+    if not clean_id.startswith("tmdb:") and not clean_id.startswith("tt"):
+        raise HTTPException(status_code=400, detail="Only tmdb: or tt IDs are supported for movies/series")
         
-    try:
-        tmdb_id = int(clean_id.split(":")[1])
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid TMDB ID")
-
-    # If user hasn't configured an API key, we can't fetch TMDB meta
     api_key = user_config.tmdb_api_key if user_config else ""
     if not api_key:
         raise HTTPException(status_code=400, detail="TMDB API Key required for metadata")
@@ -187,11 +181,33 @@ async def _handle_tmdb_meta(request: Request, content_type: str, clean_id: str, 
     language = user_config.language if user_config else "pt-BR"
     
     try:
+        tmdb_id = None
+        
+        if clean_id.startswith("tt"):
+            # Resolve IMDB ID to TMDB ID
+            find_res = await tmdb.find_by_external_id(clean_id)
+            if content_type == "movie" and find_res.get("movie_results"):
+                tmdb_id = find_res["movie_results"][0]["id"]
+            elif content_type == "series" and find_res.get("tv_results"):
+                tmdb_id = find_res["tv_results"][0]["id"]
+            if not tmdb_id:
+                raise HTTPException(status_code=404, detail="TMDB ID not found for IMDB ID")
+        else:
+            try:
+                tmdb_id = int(clean_id.split(":")[1])
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid TMDB ID")
         if content_type == "movie":
             details = await tmdb.get_movie_details(tmdb_id, language)
         else:
             details = await tmdb.get_series_details(tmdb_id, language)
             
+        rel_date = details.get("release_date") if content_type == "movie" else details.get("first_air_date")
+        release_info = str(rel_date)[:4] if rel_date else None
+        
+        runtime = details.get("runtime")
+        runtime_str = f"{runtime} min" if runtime else None
+        
         meta = {
             "id": clean_id,
             "type": content_type,
@@ -200,27 +216,27 @@ async def _handle_tmdb_meta(request: Request, content_type: str, clean_id: str, 
             "posterShape": "poster",
             "background": tmdb._make_backdrop_url(details.get("backdrop_path")),
             "description": details.get("overview"),
-            "releaseInfo": str(details.get("release_date", "")[:4]) if content_type == "movie" else str(details.get("first_air_date", "")[:4]),
+            "releaseInfo": release_info,
             "imdbRating": str(round(details["vote_average"], 1)) if details.get("vote_average") else None,
             "genres": [g["name"] for g in details.get("genres", [])],
-            "runtime": f"{details.get('runtime', 0)} min" if content_type == "movie" else None,
+            "runtime": runtime_str if content_type == "movie" else None,
         }
         
         # Add cast
-        credits = details.get("credits", {})
-        cast = [c["name"] for c in credits.get("cast", [])[:5]]
+        credits_data = details.get("credits") or {}
+        cast = [c["name"] for c in credits_data.get("cast", [])[:5]]
         if cast:
             meta["cast"] = cast
             
         # Add directors
-        crew = credits.get("crew", [])
+        crew = credits_data.get("crew", [])
         directors = [c["name"] for c in crew if c.get("job") == "Director"]
         if directors:
             meta["director"] = directors
 
         # Add videos/trailers
-        videos = details.get("videos", {}).get("results", [])
-        trailers = [v for v in videos if v.get("site") == "YouTube" and v.get("type") == "Trailer"]
+        videos_data = details.get("videos") or {}
+        trailers = [v for v in videos_data.get("results", []) if v.get("site") == "YouTube" and v.get("type") == "Trailer"]
         if trailers:
             meta["trailers"] = [{"source": t["key"], "type": "Trailer"} for t in trailers]
 

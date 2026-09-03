@@ -180,6 +180,20 @@ async def _fetch_tmdb_catalog(
                 else:
                     items = await tmdb.discover_series(genre_ids, language, page, **extra_kwargs)
 
+        import asyncio
+        async def resolve_imdb(item):
+            try:
+                ext_ids = await tmdb.get_external_ids(item['tmdb_id'], content_type)
+                imdb_id = ext_ids.get("imdb_id")
+                if imdb_id:
+                    item['imdb_id'] = imdb_id
+            except Exception as e:
+                logger.debug(f"Failed to resolve IMDB ID for TMDB {item['tmdb_id']}: {e}")
+            return item
+            
+        if items:
+            items = await asyncio.gather(*[resolve_imdb(item) for item in items])
+
         return [_tmdb_item_to_meta(item, content_type) for item in items]
     finally:
         await tmdb.close()
@@ -187,8 +201,9 @@ async def _fetch_tmdb_catalog(
 
 def _tmdb_item_to_meta(item: dict[str, Any], content_type: str) -> dict[str, Any]:
     """Convert a TMDB list item dict to a Stremio MetaPreview dict."""
+    item_id = item.get("imdb_id") or f"tmdb:{item['tmdb_id']}"
     return {
-        "id": f"tmdb:{item['tmdb_id']}",
+        "id": item_id,
         "type": content_type,
         "name": item.get("name", ""),
         "poster": item.get("poster"),
