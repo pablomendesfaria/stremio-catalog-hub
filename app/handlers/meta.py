@@ -30,17 +30,36 @@ async def _handle_meta(
     item_id: str,
     config: str | None = None,
 ) -> JSONResponse:
-    """Resolve metadata for an anime item."""
-
-    # We only handle anime meta — movies/series use Cinemeta
-    if content_type != "anime":
-        raise HTTPException(
-            status_code=404,
-            detail="Only anime meta is supported by this addon",
-        )
-
+    """Resolve metadata for an item."""
     user_config = decode_user_config(config) if config else None
+    cache = request.app.state.cache
 
+    # Strip .json suffix if present
+    clean_id = item_id.removesuffix(".json")
+
+    cache_key = f"meta:{content_type}:{clean_id}"
+    if user_config:
+        cache_key += f":{user_config.language}"
+
+    cached = await cache.get(cache_key)
+    if cached is not None:
+        return JSONResponse(content=cached)
+
+    if content_type in ("movie", "series"):
+        response = await _handle_tmdb_meta(request, content_type, clean_id, user_config)
+    elif content_type == "anime":
+        response = await _handle_anime_meta(request, clean_id, user_config)
+    else:
+        raise HTTPException(status_code=404, detail="Unsupported content type")
+
+    if response:
+        await cache.set(cache_key, response, ttl=86400)
+        return JSONResponse(content=response)
+    
+    raise HTTPException(status_code=404, detail="Metadata not found")
+
+
+async def _handle_anime_meta(request: Request, clean_id: str, user_config: Any) -> dict[str, Any] | None:
     anilist_client = request.app.state.anilist_client
     anime_grouper = request.app.state.anime_grouper
     id_mapper = request.app.state.id_mapper
@@ -72,11 +91,7 @@ async def _handle_meta(
     if not anilist_id:
         raise HTTPException(status_code=404, detail="Could not resolve anime ID")
 
-    # ── Check cache ─────────────────────────────────────────────────────
-    cache_key = f"meta:anime:{anilist_id}"
-    cached = await cache.get(cache_key)
-    if cached is not None:
-        return JSONResponse(content=cached)
+
 
     # ── Fetch anime details from AniList ────────────────────────────────
     anime_details = await anilist_client.get_anime_details(anilist_id)
@@ -149,15 +164,10 @@ async def _handle_meta(
             except Exception:
                 logger.debug("Could not fetch TMDB details for anime %d", anilist_id)
 
-    response = {
+    return {
         "meta": meta,
         "cacheMaxAge": 86400,  # 24 hours
     }
-
-    # Cache the response
-    await cache.set(cache_key, response, ttl=86400)
-
-    return JSONResponse(content=response)
 
 
 # ── Route definitions ──────────────────────────────────────────────────

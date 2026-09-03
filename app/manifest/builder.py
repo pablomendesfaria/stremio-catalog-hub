@@ -19,12 +19,12 @@ async def build_manifest(user_config: UserConfig | None, catalog_registry: Any) 
             'catalog',
             ResourceDescriptor(
                 name='meta',
-                types=['anime'],
-                id_prefixes=['kitsu:', 'anilist:'],
+                types=['movie', 'series', 'anime'],
+                id_prefixes=['tmdb:', 'kitsu:', 'anilist:'],
             ),
         ],
         catalogs=catalog_entries,
-        id_prefixes=['tt', 'kitsu:', 'anilist:'],
+        id_prefixes=['tt', 'tmdb:', 'kitsu:', 'anilist:'],
         behavior_hints=BehaviorHints(
             configurable=True,
             configuration_required=(user_config is None),
