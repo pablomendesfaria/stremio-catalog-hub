@@ -109,13 +109,25 @@ class IDMapper:
                 continue
 
             try:
+                # Fribb provides imdb_id as a list of strings
+                raw_imdb = item.get("imdb_id")
+                imdb_id = raw_imdb[0] if isinstance(raw_imdb, list) and raw_imdb else raw_imdb if isinstance(raw_imdb, str) else None
+                
+                # Fribb provides themoviedb_id as a dict, e.g. {'tv': 26209} or {'movie': 123}
+                raw_tmdb = item.get("themoviedb_id")
+                tmdb_id = None
+                if isinstance(raw_tmdb, dict):
+                    tmdb_id = raw_tmdb.get("tv") or raw_tmdb.get("movie")
+                elif raw_tmdb:
+                    tmdb_id = int(raw_tmdb)
+                
                 mappings = Mappings(
                     anilist_id=anilist_id,
-                    imdb_id=item.get("imdb_id"),
+                    imdb_id=imdb_id,
                     kitsu_id=int(item["kitsu_id"]) if item.get("kitsu_id") else None,
                     mal_id=int(item["mal_id"]) if item.get("mal_id") else None,
                     thetvdb_id=int(item["thetvdb_id"]) if item.get("thetvdb_id") else None,
-                    themoviedb_id=int(item["themoviedb_id"]) if item.get("themoviedb_id") else None,
+                    themoviedb_id=tmdb_id,
                 )
                 
                 self.anilist_to_mappings[anilist_id] = mappings
