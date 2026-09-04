@@ -205,6 +205,11 @@ class TMDBClient:
         data = await self._request("GET", f"/tv/{tmdb_id}", params=params)
         return data
 
+    async def get_season_details(self, tmdb_id: int, season_number: int, language: str = "pt-BR") -> Dict[str, Any]:
+        """Get full details for a specific season, which includes the episodes array with thumbnails."""
+        params = {"language": language}
+        return await self._request("GET", f"/tv/{tmdb_id}/season/{season_number}", params=params)
+
     async def search_series(self, query: str, language: str = "pt-BR", page: int = 1) -> List[Dict[str, Any]]:
         """Search for series."""
         params = {"query": query, "language": language, "page": page}

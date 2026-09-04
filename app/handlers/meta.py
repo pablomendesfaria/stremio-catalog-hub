@@ -158,10 +158,65 @@ async def _handle_anime_meta(request: Request, clean_id: str, user_config: Any) 
                     tmdb_name = tmdb_details.get("name")
                     if tmdb_name and user_config.language != "en-US":
                         meta["name"] = tmdb_name
+                        
+                    # Fix background with TMDB backdrop (16:9) since AniList banners are too wide and get zoomed/pixelated
+                    if tmdb_details.get("backdrop_path"):
+                        meta["background"] = f"https://image.tmdb.org/t/p/original{tmdb_details['backdrop_path']}"
+                        
+                    # Add logo
+                    if getattr(user_config, "show_logos", True):
+                        images_data = tmdb_details.get("images") or {}
+                        logos = images_data.get("logos", [])
+                        if logos:
+                            lang_code = user_config.language[:2]
+                            logo = next((l for l in logos if l.get("iso_639_1") == lang_code), None)
+                            if not logo:
+                                logo = next((l for l in logos if l.get("iso_639_1") == "en"), None)
+                            if not logo:
+                                logo = logos[0]
+                            if logo and logo.get("file_path"):
+                                meta["logo"] = f"https://image.tmdb.org/t/p/original{logo['file_path']}"
+
+                    # Add episode thumbnails
+                    if "seasons" in tmdb_details:
+                        import asyncio
+                        season_tasks = []
+                        for season in tmdb_details["seasons"]:
+                            s_num = season.get("season_number")
+                            if s_num is not None:
+                                season_tasks.append(tmdb.get_season_details(tmdb_id, s_num, user_config.language))
+                        
+                        seasons_data = await asyncio.gather(*season_tasks, return_exceptions=True)
+                        
+                        # Create a quick lookup for episode thumbnails
+                        ep_meta = {}
+                        for season_data in seasons_data:
+                            if isinstance(season_data, Exception) or not isinstance(season_data, dict):
+                                continue
+                            s_num = season_data.get("season_number")
+                            for ep in season_data.get("episodes", []):
+                                ep_num = ep.get("episode_number")
+                                ep_meta[(s_num, ep_num)] = ep
+                                
+                        # Enrich existing videos array
+                        for video in meta["videos"]:
+                            s_num = video.get("season")
+                            ep_num = video.get("episode")
+                            if (s_num, ep_num) in ep_meta:
+                                ep = ep_meta[(s_num, ep_num)]
+                                if ep.get("name"):
+                                    video["title"] = ep["name"]
+                                if ep.get("still_path"):
+                                    video["thumbnail"] = f"https://image.tmdb.org/t/p/w500{ep['still_path']}"
+                                if ep.get("overview"):
+                                    video["overview"] = ep["overview"]
+                                if ep.get("air_date"):
+                                    video["released"] = f"{ep['air_date']}T00:00:00.000Z"
+
                 finally:
                     await tmdb.close()
-            except Exception:
-                logger.debug("Could not fetch TMDB details for anime %d", anilist_id)
+            except Exception as e:
+                logger.error("Could not fetch TMDB details for anime %d: %s", anilist_id, e)
 
     return {
         "meta": meta,
@@ -293,19 +348,42 @@ async def _handle_tmdb_meta(request: Request, content_type: str, clean_id: str, 
 
         # Add episodes if series
         if content_type == "series" and "seasons" in details:
+            import asyncio
             meta_videos = []
+            
+            # Fetch all seasons concurrently to get episode thumbnails and names
+            season_tasks = []
             for season in details["seasons"]:
                 s_num = season.get("season_number")
-                # Skip specials (season 0) if you want, but Stremio supports it
-                ep_count = season.get("episode_count", 0)
-                for ep_num in range(1, ep_count + 1):
-                    # We just provide the grid, no need to fetch individual episode names for now to save API calls
-                    meta_videos.append({
+                if s_num is not None:
+                    season_tasks.append(tmdb.get_season_details(tmdb_id, s_num, language))
+            
+            seasons_data = await asyncio.gather(*season_tasks, return_exceptions=True)
+            
+            for season_data in seasons_data:
+                if isinstance(season_data, Exception) or not isinstance(season_data, dict):
+                    continue
+                    
+                s_num = season_data.get("season_number")
+                for ep in season_data.get("episodes", []):
+                    ep_num = ep.get("episode_number")
+                    
+                    video = {
                         "id": f"{clean_id}:{s_num}:{ep_num}",
-                        "title": f"Episódio {ep_num}",
+                        "title": ep.get("name") or f"Episódio {ep_num}",
                         "season": s_num,
                         "episode": ep_num,
-                    })
+                        "overview": ep.get("overview")
+                    }
+                    
+                    if ep.get("still_path"):
+                        video["thumbnail"] = f"https://image.tmdb.org/t/p/w500{ep['still_path']}"
+                        
+                    if ep.get("air_date"):
+                        video["released"] = f"{ep['air_date']}T00:00:00.000Z"
+                        
+                    meta_videos.append(video)
+                    
             if meta_videos:
                 meta["videos"] = meta_videos
 
