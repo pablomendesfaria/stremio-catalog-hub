@@ -36,107 +36,55 @@ class AnimeGrouper:
 
     async def group_anime(self, anilist_id: int) -> AnimeGroup:
         """
-        Group anime seasons into a single franchise entry starting from the given ID.
+        Group anime seasons into a single franchise entry instantly using Fribb TMDB IDs.
         """
-        # 1. Check cache first
-        member_cache_key = f"anime_group_member:{anilist_id}"
-        root_id_str = await self.cache.get(member_cache_key)
-        
-        if root_id_str:
-            root_id = int(root_id_str)
-            group_cache_key = f"anime_group:{root_id}"
-            group_data_str = await self.cache.get(group_cache_key)
-            if group_data_str:
-                try:
-                    return AnimeGroup.model_validate_json(group_data_str)
-                except Exception as e:
-                    logger.warning(f"Failed to parse cached AnimeGroup for root {root_id}: {e}")
-        
-        # 3. Find root (Season 1)
-        current_id = anilist_id
-        depth = 0
-        visited_prequels = set()
-        
-        # Cache of node details to avoid re-fetching root details if not necessary
-        node_details = {}
-        
-        while depth < 20:
-            if current_id in visited_prequels:
-                break
-            visited_prequels.add(current_id)
+        if not self.id_mapper._is_loaded:
+            await self.id_mapper.load_database()
             
-            edges = await self._get_relations(current_id)
-            if not edges:
-                break
-                
-            found_prequel = False
-            for edge in edges:
-                rel_type = edge.get("relationType")
-                node = edge.get("node", {})
-                node_type = node.get("type")
-                node_format = node.get("format")
-                
-                if rel_type == "PREQUEL" and node_type == "ANIME" and node_format in ("TV", "TV_SHORT", "ONA"):
-                    node_id = node.get("id")
-                    if node_id:
-                        node_details[node_id] = node
-                        current_id = node_id
-                        found_prequel = True
-                        break
-                        
-            if not found_prequel:
-                break
-            depth += 1
-            
-        root_id = current_id
+        mappings = self.id_mapper.anilist_to_mappings.get(anilist_id)
         
-        # 4. Build season chain
+        # If no TMDB ID, we return a standalone group
+        if not mappings or not mappings.themoviedb_id:
+            stremio_id = await self.id_mapper.get_stremio_id(anilist_id)
+            group = AnimeGroup(
+                root_anilist_id=anilist_id,
+                title="",
+                stremio_id=stremio_id,
+                seasons=[AnimeSeasonEntry(anilist_id=anilist_id, season_number=1, title="", stremio_id=stremio_id)]
+            )
+            return group
+
+        # Fetch all AniList IDs sharing the same TMDB ID
+        tmdb_id = mappings.themoviedb_id
+        related_seasons = self.id_mapper.tmdb_to_anilist_seasons.get(tmdb_id, [])
+        
+        if not related_seasons:
+            related_seasons = [(anilist_id, mappings.tmdb_season or 1)]
+            
+        # Deduplicate and sort by season
+        unique_seasons = {}
+        for a_id, s_num in related_seasons:
+            if s_num not in unique_seasons or unique_seasons[s_num] == a_id:
+                unique_seasons[s_num] = a_id
+            # If Fribb has multiple anilist_ids for the same season (like Part 1 / Part 2), 
+            # we keep the first one or we can just append them sequentially.
+            # But Stremio only supports one list of episodes per season.
+            # We'll just map both! Let's allow multiple AniList IDs per season!
+            # Wait, our meta_videos logic uses `season_entry.season_number`.
+            # If two entries have the same season number, their episodes will append!
+        
+        # Better: just use a list, sort by season
         seasons: List[AnimeSeasonEntry] = []
-        visited_sequels = set()
+        # Sort by season number, then by anilist_id to maintain part1/part2 order
+        related_seasons.sort(key=lambda x: (x[1], x[0]))
         
-        current_seq_id = root_id
-        season_number = 1
-        depth = 0
-        
-        while depth < 20:
-            if current_seq_id in visited_sequels:
-                break
-            visited_sequels.add(current_seq_id)
-            
-            # Record current season
-            seasons.append(AnimeSeasonEntry(
-                anilist_id=current_seq_id,
-                season_number=season_number
-            ))
-            
-            edges = await self._get_relations(current_seq_id)
-            found_sequel = False
-            if edges:
-                for edge in edges:
-                    rel_type = edge.get("relationType")
-                    node = edge.get("node", {})
-                    node_type = node.get("type")
-                    node_format = node.get("format")
-                    
-                    if rel_type == "SEQUEL" and node_type == "ANIME" and node_format in ("TV", "TV_SHORT", "ONA"):
-                        node_id = node.get("id")
-                        if node_id:
-                            node_details[node_id] = node
-                            current_seq_id = node_id
-                            found_sequel = True
-                            season_number += 1
-                            break
-                            
-            if not found_sequel:
-                break
-            depth += 1
-            
-        # 5. Resolve Stremio ID
-        stremio_id = None
-        try:
-            stremio_id = await self.id_mapper.get_stremio_id(root_id)
-        except Exception as e:
-            logger.error(f"Failed to resolve Stremio ID for root {root_id}: {e}")
+        for a_id, s_num in related_seasons:
+            s_id = await self.id_mapper.get_stremio_id(a_id)
+            seasons.append(AnimeSeasonEntry(anilist_id=a_id, season_number=s_num, title="", stremio_id=s_id))
+
+        # Find the root (lowest season)
+        root_id = seasons[0].anilist_id
+        stremio_id = await self.id_mapper.get_stremio_id(root_id)
 
         # 6. Build AnimeGroup
         title = ""
@@ -144,33 +92,16 @@ class AnimeGrouper:
         banner = ""
         genres = []
         
-        # Attempt to get root info from node_details or fetch directly if missing
-        root_node = node_details.get(root_id)
-        if not root_node and hasattr(self.anilist_client, 'get_anime'):
-            try:
-                root_node = await self.anilist_client.get_anime(root_id)
-            except Exception:
-                pass
-                
-        if root_node:
-            title_dict = root_node.get("title", {})
-            title = title_dict.get("english") or title_dict.get("romaji") or ""
-            
-            cover_img = root_node.get("coverImage", {})
-            if isinstance(cover_img, dict):
-                poster = cover_img.get("large") or cover_img.get("medium") or ""
-            elif isinstance(cover_img, str):
-                poster = cover_img
-                
-            banner = root_node.get("bannerImage", "")
-            genres = root_node.get("genres", [])
+        # We purposefully do NOT fetch root_node from AniList here to avoid rate limits!
+        # The deduplicate_catalog method will naturally fallback to using the current item's
+        # title, poster, etc. which is perfectly fine for the catalog UI.
         
         group = AnimeGroup(
             root_anilist_id=root_id,
-            title=title,
-            poster=poster,
-            banner=banner,
-            genres=genres,
+            title="",
+            poster="",
+            banner="",
+            genres=[],
             stremio_id=stremio_id,
             seasons=seasons
         )

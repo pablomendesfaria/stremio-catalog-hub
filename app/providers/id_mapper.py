@@ -21,6 +21,7 @@ class Mappings(BaseModel):
     mal_id: Optional[int] = None
     thetvdb_id: Optional[int] = None
     themoviedb_id: Optional[int] = None
+    tmdb_season: Optional[int] = None
 
 class IDMapper:
     """
@@ -37,6 +38,7 @@ class IDMapper:
         self.imdb_to_anilist: Dict[str, int] = {}
         self.mal_to_anilist: Dict[int, int] = {}
         self.kitsu_to_anilist: Dict[int, int] = {}
+        self.tmdb_to_anilist_seasons: Dict[int, List[tuple[int, int]]] = {}
         self._is_loaded = False
 
     async def load_database(self) -> None:
@@ -102,6 +104,7 @@ class IDMapper:
         self.imdb_to_anilist.clear()
         self.mal_to_anilist.clear()
         self.kitsu_to_anilist.clear()
+        self.tmdb_to_anilist_seasons.clear()
 
         for item in data:
             anilist_id = self._extract_anilist_id(item)
@@ -121,6 +124,14 @@ class IDMapper:
                 elif raw_tmdb:
                     tmdb_id = int(raw_tmdb)
                 
+                # Extract TMDB season if available
+                raw_season = item.get("season")
+                tmdb_season = None
+                if isinstance(raw_season, dict):
+                    tmdb_season = raw_season.get("tmdb")
+                elif isinstance(raw_season, int):
+                    tmdb_season = raw_season
+                    
                 mappings = Mappings(
                     anilist_id=anilist_id,
                     imdb_id=imdb_id,
@@ -128,6 +139,7 @@ class IDMapper:
                     mal_id=int(item["mal_id"]) if item.get("mal_id") else None,
                     thetvdb_id=int(item["thetvdb_id"]) if item.get("thetvdb_id") else None,
                     themoviedb_id=tmdb_id,
+                    tmdb_season=int(tmdb_season) if tmdb_season is not None else None
                 )
                 
                 self.anilist_to_mappings[anilist_id] = mappings
@@ -138,6 +150,13 @@ class IDMapper:
                     self.mal_to_anilist[mappings.mal_id] = anilist_id
                 if mappings.kitsu_id:
                     self.kitsu_to_anilist[mappings.kitsu_id] = anilist_id
+                if mappings.themoviedb_id:
+                    if mappings.themoviedb_id not in self.tmdb_to_anilist_seasons:
+                        self.tmdb_to_anilist_seasons[mappings.themoviedb_id] = []
+                    # Append tuple (anilist_id, season)
+                    self.tmdb_to_anilist_seasons[mappings.themoviedb_id].append(
+                        (anilist_id, mappings.tmdb_season or 1)
+                    )
             except (ValueError, TypeError) as e:
                 # Ignore invalid entries rather than failing the whole load
                 logger.debug(f"Failed to parse item IDs for {anilist_id}: {e}")
